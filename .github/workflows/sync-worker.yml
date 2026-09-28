@@ -1,0 +1,109 @@
+name: 拉取 cmliu 最新 _worker.js 并修补测速逻辑
+
+on:
+  workflow_dispatch:
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: write
+
+    steps:
+      - name: 检出当前仓库
+        uses: actions/checkout@v4
+
+      - name: 下载 cmliu 最新 _worker.js
+        run: |
+          curl -fL \
+            https://raw.githubusercontent.com/cmliu/edgetunnel/main/_worker.js \
+            -o _worker.js
+
+      - name: 修补 _worker.js
+        run: |
+          python3 <<'PY'
+          import re
+          import sys
+
+          with open("_worker.js", "r", encoding="utf-8") as f:
+              content = f.read()
+
+          # 1. 修改调用方式
+          content = re.sub(
+              r'\bisSpeedTestSite\(\s*hostname\s*\)',
+              'isSpeedTestSite(hostname, port)',
+              content
+          )
+
+          # 2. 查找测速函数
+          pattern = r'function\s+isSpeedTestSite\s*\([^)]*\)\s*\{[\s\S]*?\n\}'
+
+          replacement = """function isSpeedTestSite(hostname, port) {
+            if (port != 80 || !hostname) return false;
+
+            const speedTestDomains = [
+              'speed.cloudflare.com',
+              'cp.cloudflare.com'
+            ];
+
+            hostname = hostname.toLowerCase();
+
+            return speedTestDomains.some(
+              domain =>
+                hostname === domain ||
+                hostname.endsWith('.' + domain)
+            );
+          }"""
+
+          new_content, count = re.subn(
+              pattern,
+              replacement,
+              content,
+              count=1
+          )
+
+          if count != 1:
+              print("错误：没有找到 isSpeedTestSite 函数，补丁失败！")
+              sys.exit(1)
+
+          content = new_content
+
+          # 3. 检查补丁是否真的存在
+          if "function isSpeedTestSite(hostname, port)" not in content:
+              print("错误：函数补丁验证失败！")
+              sys.exit(1)
+
+          if "speed.cloudflare.com" not in content:
+              print("错误：speed.cloudflare.com 不存在！")
+              sys.exit(1)
+
+          if "cp.cloudflare.com" not in content:
+              print("错误：cp.cloudflare.com 不存在！")
+              sys.exit(1)
+
+          with open("_worker.js", "w", encoding="utf-8") as f:
+              f.write(content)
+
+          print("补丁成功！")
+          PY
+
+      - name: 显示修改结果
+        run: |
+          echo "========== isSpeedTestSite =========="
+          grep -n -A15 -B2 "function isSpeedTestSite" _worker.js || true
+
+      - name: 保存修改并推送
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+
+          git add _worker.js
+
+          if git diff --cached --quiet; then
+            echo "没有变化，无需提交。"
+          else
+            git commit -m "sync: 更新 cmliu _worker.js 并修补测速逻辑 [skip ci]"
+            git push
+            echo "修改完成，已成功推送到仓库！"
+          fi
