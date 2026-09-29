@@ -1,7 +1,7 @@
 name: 拉取 cmliu 最新 _worker.js 并修补测速逻辑
 
 on:
-  workflow_dispatch:
+  workflow_dispatch: # 在 GitHub Actions 页面手动点击触发
 
 jobs:
   patch:
@@ -14,96 +14,48 @@ jobs:
       - name: 检出当前仓库
         uses: actions/checkout@v4
 
-      - name: 下载 cmliu 最新 _worker.js
+      - name: 下载 cmliu 仓库最新 _worker.js
         run: |
-          curl -fL \
-            https://raw.githubusercontent.com/cmliu/edgetunnel/main/_worker.js \
-            -o _worker.js
+          curl -sSL https://raw.githubusercontent.com/cmliu/edgetunnel/main/_worker.js -o _worker.js
 
-      - name: 修补 _worker.js
+      - name: 强制修补 _worker.js
         run: |
-          python3 <<'PY'
+          python3 -c "
           import re
-          import sys
 
-          with open("_worker.js", "r", encoding="utf-8") as f:
+          with open('_worker.js', 'r', encoding='utf-8') as f:
               content = f.read()
 
-          # 1. 修改调用方式
-          content = re.sub(
-              r'\bisSpeedTestSite\(\s*hostname\s*\)',
-              'isSpeedTestSite(hostname, port)',
-              content
+          # 1. 替换所有调用处的参数传入：isSpeedTestSite(hostname) -> isSpeedTestSite(hostname, port)
+          content = re.sub(r'\bisSpeedTestSite\(\s*hostname\s*\)', 'isSpeedTestSite(hostname, port)', content)
+
+          # 2. 匹配并直接覆盖整个 isSpeedTestSite 函数体，确保包含 80 端口校验
+          func_pattern = r'function\s+isSpeedTestSite\s*\([^)]*\)\s*\{[\s\S]*?\}'
+          func_replace = (
+              'function isSpeedTestSite(hostname, port) {\n'
+              ' if (port != 80 || !hostname) return false;\n'
+              ' const speedTestDomains = [\'speed.cloudflare.com\', \'cp.cloudflare.com\'];\n'
+              ' hostname = hostname.toLowerCase();\n'
+              ' return speedTestDomains.some(domain => hostname === domain || hostname.endsWith(\'.\' + domain));\n'
+              '}'
           )
 
-          # 2. 查找测速函数
-          pattern = r'function\s+isSpeedTestSite\s*\([^)]*\)\s*\{[\s\S]*?\n\}'
+          content = re.sub(func_pattern, func_replace, content)
 
-          replacement = """function isSpeedTestSite(hostname, port) {
-            if (port != 80 || !hostname) return false;
-
-            const speedTestDomains = [
-              'speed.cloudflare.com',
-              'cp.cloudflare.com'
-            ];
-
-            hostname = hostname.toLowerCase();
-
-            return speedTestDomains.some(
-              domain =>
-                hostname === domain ||
-                hostname.endsWith('.' + domain)
-            );
-          }"""
-
-          new_content, count = re.subn(
-              pattern,
-              replacement,
-              content,
-              count=1
-          )
-
-          if count != 1:
-              print("错误：没有找到 isSpeedTestSite 函数，补丁失败！")
-              sys.exit(1)
-
-          content = new_content
-
-          # 3. 检查补丁是否真的存在
-          if "function isSpeedTestSite(hostname, port)" not in content:
-              print("错误：函数补丁验证失败！")
-              sys.exit(1)
-
-          if "speed.cloudflare.com" not in content:
-              print("错误：speed.cloudflare.com 不存在！")
-              sys.exit(1)
-
-          if "cp.cloudflare.com" not in content:
-              print("错误：cp.cloudflare.com 不存在！")
-              sys.exit(1)
-
-          with open("_worker.js", "w", encoding="utf-8") as f:
+          with open('_worker.js', 'w', encoding='utf-8') as f:
               f.write(content)
+          "
 
-          print("补丁成功！")
-          PY
-
-      - name: 显示修改结果
-        run: |
-          echo "========== isSpeedTestSite =========="
-          grep -n -A15 -B2 "function isSpeedTestSite" _worker.js || true
-
-      - name: 保存修改并推送
+      - name: 保存修改并推送回仓库
         run: |
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
 
-          git add _worker.js
-
-          if git diff --cached --quiet; then
-            echo "没有变化，无需提交。"
-          else
-            git commit -m "sync: 更新 cmliu _worker.js 并修补测速逻辑 [skip ci]"
+          if [ -n "$(git status --porcelain)" ]; then
+            git add _worker.js
+            git commit -m "sync: 同步 cmliu 最新 _worker.js 并修复 80 端口测速拦截逻辑 [skip ci]"
             git push
             echo "修改完成，已成功推送到仓库！"
+          else
+            echo "代码与 cmliu 最新版本一致且已成功打补丁，无需重复提交。"
           fi
