@@ -3095,20 +3095,10 @@ async function connectStreams(remoteSocket, webSocket, headerData, retryFunc, is
 }
 
 function isSpeedTestSite(hostname, port) {
-  if (port != 80 || !hostname) return false;
-
-  const speedTestDomains = [
-    'speed.cloudflare.com',
-    'cp.cloudflare.com'
-  ];
-
-  hostname = hostname.toLowerCase();
-
-  return speedTestDomains.some(
-    domain =>
-      hostname === domain ||
-      hostname.endsWith('.' + domain)
-  );
+ if (port != 80 || !hostname) return false;
+ const speedTestDomains = ['speed.cloudflare.com', 'cp.cloudflare.com'];
+ hostname = hostname.toLowerCase();
+ return speedTestDomains.some(domain => hostname === domain || hostname.endsWith('.' + domain));
 }
 
 function 构造本地204响应(respHeader = null) {
